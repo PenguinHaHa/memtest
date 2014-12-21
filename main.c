@@ -31,16 +31,17 @@ void printBuf(void* buf, int size);
 ////////////
 int main(int agrc, char* argv[])
 {
-  int    MemDescriptor;
-  int    lasterror;
-  int   buf[10];
-  size_t retSize;
+  int      Mem_fd;
+  int      lasterror;
+  size_t   count;
+  char     buf[10];
+  ssize_t  retSize;
 
   printf("This is Penguin's mm\n");
 
   // Try to open /dev/mem
-  MemDescriptor = open("/dev/mem", O_RDWR);
-  if (MemDescriptor == -1)
+  Mem_fd = open("/dev/mem", O_RDWR);
+  if (Mem_fd < 0)
   {
     lasterror = errno;
     printf("Open /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
@@ -48,27 +49,36 @@ int main(int agrc, char* argv[])
   }
 
   // Try to read directly
-  retSize = read(MemDescriptor, buf, 10);
-  if (retSize == -1)
+  lseek(Mem_fd, 0, SEEK_SET);
+  count = 10;
+  retSize = read(Mem_fd, buf, count);
+  if (retSize < 0)
   {
     lasterror = errno;
     printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
     return -1;
   }
-  printBuf(buf, 10);
+  printBuf(buf, count);
 
+  // Close /dev/mem
+  if (close(Mem_fd) < 0 )
+  {
+    lasterror = errno;
+    printf("clos /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    return -1;
+  }
   return 0;
 }
 
 void printBuf(void* buf, int size)
 {
   int   i;
-  int* ptr;
+  char* ptr;
 
-  ptr = (int*)buf;
+  ptr = buf;
   for(i = 0; i < size; i++)
   {
-    printf("%08x ", *ptr++);
+    printf("%x ", ptr[i]);
   }
   printf("\n");
 }
