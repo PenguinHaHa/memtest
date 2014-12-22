@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 ////////////
 // PROTOTYPES
@@ -31,7 +32,7 @@ void printBuf(void* buf, int size);
 ////////////
 int main(int agrc, char* argv[])
 {
-  int      Mem_fd;
+  int      mem_fd;
   int      lasterror;
   size_t   count;
   char     buf[10];
@@ -40,8 +41,8 @@ int main(int agrc, char* argv[])
   printf("This is Penguin's mm\n");
 
   // Try to open /dev/mem
-  Mem_fd = open("/dev/mem", O_RDWR);
-  if (Mem_fd < 0)
+  mem_fd = open("/dev/mem", O_RDWR);
+  if (mem_fd < 0)
   {
     lasterror = errno;
     printf("Open /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
@@ -50,9 +51,9 @@ int main(int agrc, char* argv[])
 
   // Try to read directly
   // Read the first 10 bytes
-  lseek(Mem_fd, 0, SEEK_SET);
+  lseek(mem_fd, 0, SEEK_SET);
   count = 10;
-  retSize = read(Mem_fd, buf, count);
+  retSize = read(mem_fd, buf, count);
   if (retSize < 0)
   {
     lasterror = errno;
@@ -62,10 +63,10 @@ int main(int agrc, char* argv[])
   printBuf(buf, count);
 
   // Try to read directly
-  // Read 10 bytes after 1M
-  lseek(Mem_fd, ONE_M, SEEK_SET);
+  // Read 10 bytes above 1M
+  lseek(mem_fd, ONE_M, SEEK_SET);
   count = 10;
-  retSize = read(Mem_fd, buf, count);
+  retSize = read(mem_fd, buf, count);
   if (retSize < 0)
   {
     lasterror = errno;
@@ -73,8 +74,21 @@ int main(int agrc, char* argv[])
     //return -1;
   }
 
+  // Try to read it by mmap
+  // Read 10 bytes above 1M
+  int *mappedAddr;
+  int addr = 0;
+  mappedAddr = mmap(&addr, 10, PROT_READ, MAP_SHARED, mem_fd, 0);
+  if (retSize < 0)
+  {
+    lasterror = errno;
+    printf("map 10 bytes of /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    return -1;
+  }
+  munmap(&addr, 10);
+
   // Close /dev/mem
-  if (close(Mem_fd) < 0 )
+  if (close(mem_fd) < 0 )
   {
     lasterror = errno;
     printf("clos /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
