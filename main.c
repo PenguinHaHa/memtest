@@ -49,6 +49,7 @@ int main(int agrc, char* argv[])
   }
 
   // Try to read directly
+  // Read the first 10 bytes
   lseek(Mem_fd, 0, SEEK_SET);
   count = 10;
   retSize = read(Mem_fd, buf, count);
@@ -59,6 +60,18 @@ int main(int agrc, char* argv[])
     return -1;
   }
   printBuf(buf, count);
+
+  // Try to read directly
+  // Read 10 bytes after 1M
+  lseek(Mem_fd, ONE_M, SEEK_SET);
+  count = 10;
+  retSize = read(Mem_fd, buf, count);
+  if (retSize < 0)
+  {
+    lasterror = errno;
+    printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    //return -1;
+  }
 
   // Close /dev/mem
   if (close(Mem_fd) < 0 )
