@@ -16,15 +16,19 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <stdlib.h>
 
 ////////////
 // PROTOTYPES
 ////////////
 void printBuf(void* buf, int size);
+void directRead(int fd, int phyAddr, int count);
+void mmapRead(int fd, int phyAddr, int count);
 
 ////////////
 // LOCALS
 ////////////
+int      lasterror;
 
 
 ////////////
@@ -33,16 +37,12 @@ void printBuf(void* buf, int size);
 int main(int agrc, char* argv[])
 {
   int      mem_fd;
-  int      lasterror;
-  size_t   count;
-  char     buf[10];
-  ssize_t  retSize;
 
   printf("This is Penguin's mm\n");
 
   // Try to open /dev/mem
   mem_fd = open("/dev/mem", O_RDWR);
-  if (mem_fd < 0)
+  if (mem_fd == -1)
   {
     lasterror = errno;
     printf("Open /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
@@ -50,62 +50,84 @@ int main(int agrc, char* argv[])
   }
 
   // Try to read directly
-  // Read the first 10 bytes
-  lseek(mem_fd, 0, SEEK_SET);
-  count = 10;
-  retSize = read(mem_fd, buf, count);
-  if (retSize < 0)
-  {
-    lasterror = errno;
-    printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
-    return -1;
-  }
-  printBuf(buf, count);
+  directRead(mem_fd, 0, 0x10);
 
-  // Try to read directly
-  // Read 10 bytes above 1M
-  lseek(mem_fd, ONE_M, SEEK_SET);
-  count = 10;
-  retSize = read(mem_fd, buf, count);
-  if (retSize < 0)
-  {
-    lasterror = errno;
-    printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
-    //return -1;
-  }
-
-  // Try to read it by mmap
-  // Read 10 bytes above 1M
-  int *mappedAddr;
-  int addr = 0;
-  mappedAddr = mmap(&addr, 10, PROT_READ, MAP_SHARED, mem_fd, 0);
-  if (retSize < 0)
-  {
-    lasterror = errno;
-    printf("map 10 bytes of /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
-    return -1;
-  }
-  munmap(&addr, 10);
+  // Try to mmap /dev/mem
+  mmapRead(mem_fd, 0, 0x10);
 
   // Close /dev/mem
-  if (close(mem_fd) < 0 )
+  if (close(mem_fd) == -1)
   {
     lasterror = errno;
-    printf("clos /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    printf("close /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
     return -1;
   }
   return 0;
+
 }
 
-void printBuf(void* buf, int size)
+void mmapRead(int fd, int phyAddr, int count)
+{
+  char *mappedAddr;
+  int pageSize;
+  int *ptr;
+
+  pageSize = getpagesize();
+
+  // Check if Page aligned
+  if (phyAddr & (pageSize - 1))
+  {
+    printf("phyAddr should be page aligned\n");
+    return;
+  }
+  
+  mappedAddr = (char*)mmap(NULL, count, PROT_READ | PROT_WRITE, MAP_SHARED, fd, phyAddr);
+  if (*mappedAddr == -1)
+  {
+    lasterror = errno;
+    printf("map /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+  }
+  printf("PhyAddr %x | mappedAddr %x : ", phyAddr, *mappedAddr);
+
+  printBuf(mappedAddr, count);
+
+  if (munmap(mappedAddr, count) == -1)
+  {
+    lasterror = errno;
+    printf("unmap mmappedAddr %x of /dev/mem failed (%d) - %s\n", *mappedAddr, lasterror, strerror(lasterror));
+  }
+}
+
+void directRead(int fd, int phyAddr, int count)
+{
+  char* buf;
+  ssize_t  retSize;
+
+  buf = (char*)malloc(count);
+  memset(buf, 0, count);
+  lseek(fd, phyAddr, SEEK_SET);
+  retSize = read(fd, buf, count);
+  if (retSize < 0)
+  {
+    lasterror = errno;
+    printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+  }
+  else
+  {
+    printBuf(buf, count);
+  }
+  free(buf);
+}
+
+void printBuf(void* buf, int count)
 {
   int   i;
-  char* ptr;
+  int* ptr;
 
-  ptr = buf;
-  for(i = 0; i < size; i++)
+  ptr = (int*)buf;
+  for(i = 0; i < count/sizeof(int); i++)
   {
-    printf("%x ", ptr[i]);
+    printf("%08x ", ptr[i]);
   }
   printf("\n");
 }
