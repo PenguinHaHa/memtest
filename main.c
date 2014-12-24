@@ -17,28 +17,63 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <stdlib.h>
+#include <getopt.h>
+
+typedef enum _METHOD {
+  F,   // use function read/write
+  M    // use function mmap
+} METHOD;
+
+typedef enum _OPERATION {
+  R,   // Read
+  W,   // Write
+  NONE // do nothing
+} OPERATION;
+
+typedef struct _PARAMTERS {
+  METHOD    method;
+  OPERATION operation;
+  int    startAddr;
+  int    count;
+} PARAMTERS;
 
 ////////////
 // PROTOTYPES
 ////////////
 void printBuf(void* buf, int size);
-void directRead(int fd, int phyAddr, int count);
-void mmapRead(int fd, int phyAddr, int count);
+void fileInterface(int fd, OPERATION opera, int phyAddr, int count);
+void mmapInterface(int fd, OPERATION opera, int phyAddr, int count);
+void print_usage(void);
+void parse_options(PARAMTERS *param, int argc, char** argv);
 
 ////////////
 // LOCALS
 ////////////
-int      lasterror;
-
+int  lasterror;
+const char* const short_options = "hm:o:s:c:";
+const struct option long_options[] = {
+  {"help", 0, NULL, 'h'},
+  {"method", 1, NULL, 'm'},
+  {"operation", 1, NULL, 'o'},
+  {"startaddr", 1, NULL, 's'},
+  {"count", 1, NULL, 'c'}
+};
 
 ////////////
 // FUNCTION
 ////////////
-int main(int agrc, char* argv[])
+int main(int argc, char *argv[])
 {
-  int      mem_fd;
+  int mem_fd;
+  PARAMTERS mem_param;
 
   printf("This is Penguin's mm\n");
+
+  parse_options(&mem_param, argc, argv);
+  if (mem_param.operation == NONE)
+    return 0;
+
+  printf("method %d, operation %d, startaddr 0x%x, count %d\n", mem_param.method, mem_param.operation, mem_param.startAddr, mem_param.count);
 
   // Try to open /dev/mem
   mem_fd = open("/dev/mem", O_RDWR);
@@ -49,11 +84,13 @@ int main(int agrc, char* argv[])
     return -1;
   }
 
-  // Try to read directly
-  directRead(mem_fd, 0, 0x10);
+  // Use file operation interface 
+  if (mem_param.method == F)
+    fileInterface(mem_fd, mem_param.operation, mem_param.startAddr, mem_param.count);
 
   // Try to mmap /dev/mem
-  mmapRead(mem_fd, 0, 0x10);
+  if (mem_param.method == M)
+    mmapInterface(mem_fd, mem_param.operation, mem_param.startAddr, mem_param.count);
 
   // Close /dev/mem
   if (close(mem_fd) == -1)
@@ -66,9 +103,93 @@ int main(int agrc, char* argv[])
 
 }
 
-void mmapRead(int fd, int phyAddr, int count)
+void print_usage(void)
 {
-  char *mappedAddr;
+  printf("This is Penguin's mm\n");
+  printf("  -h  --help                 Display usage information\n");
+  printf("  -m  --method file/mmap     Specify how to access memory\n");
+  printf("  -o  --operation read/write Specify operation\n");
+  printf("  -s  --startaddr phyaddr    Specify the start memory addr\n");
+  printf("  -c  --count count          Specify memory size\n");
+}
+
+void parse_options(PARAMTERS *param, int argc, char** argv)
+{
+  int option;
+  char* opt_arg = NULL;
+
+  // Default value
+  param->method = F;
+  param->operation = R;
+  param->startAddr = 0;
+  param->count = 0x10;
+
+  do {
+    option = getopt_long(argc, argv, short_options, long_options, NULL);
+    switch (option)
+    {
+      case 'h':
+        print_usage();
+        param->operation = NONE;
+        break;
+
+      case 'm':
+        opt_arg = optarg;
+        if(!strcmp(opt_arg, "file"))
+        {
+          param->method = F;
+        }
+        else if (!strcmp(opt_arg, "mmap"))
+        {
+          param->method = M;
+        }
+        else
+        {
+          printf("invalid parameter of method!\n");
+          print_usage();
+        }
+        break;
+
+      case 'o':
+        opt_arg = optarg;
+        if(!strcmp(opt_arg, "read"))
+        {
+          param->operation = R;
+        }
+        else if(!strcmp(opt_arg, "write"))
+        {
+          param->operation = W;
+        }
+        else
+        {
+          printf("invalid parameter of method!\n");
+          print_usage();
+        }
+        break;
+
+      case 's':
+        opt_arg = optarg;
+        param->startAddr = strtol(opt_arg, NULL, 0);
+        break;
+
+      case 'c':
+        opt_arg = optarg;
+        param->count = strtol(opt_arg, NULL, 0);
+        break;
+
+      case -1:
+        break;
+
+      default:
+        printf("Unsupported option %c\n", option);
+        break;
+    }
+  }while (option != -1);
+}
+
+void mmapInterface(int fd, OPERATION opera, int phyAddr, int count)
+{
+  char *mappedPtr;
   int pageSize;
   int *ptr;
 
@@ -81,24 +202,42 @@ void mmapRead(int fd, int phyAddr, int count)
     return;
   }
   
-  mappedAddr = (char*)mmap(NULL, count, PROT_READ | PROT_WRITE, MAP_SHARED, fd, phyAddr);
-  if (*mappedAddr == -1)
+  mappedPtr = (char*)mmap(NULL, count, PROT_READ | PROT_WRITE, MAP_SHARED, fd, phyAddr);
+  if (*mappedPtr == -1)
   {
     lasterror = errno;
     printf("map /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
   }
-  printf("PhyAddr %x | mappedAddr %x : ", phyAddr, *mappedAddr);
 
-  printBuf(mappedAddr, count);
+  if (opera == R)
+  {
+    printf("PhyAddr %x | mappedAddr %x : ", phyAddr, *mappedPtr);
+    printBuf(mappedPtr, count);
+  }
+  else if (opera == W)
+  {
+    // all set 0x12
+    int i;
+    char *ptr;
+    ptr = mappedPtr;
+    for (i = 0; i < count; i++)
+    {
+      *ptr++ = 0x12;
+    }
+  }
+  else
+  {
+    printf("Invalid operation\n");
+  }
 
-  if (munmap(mappedAddr, count) == -1)
+  if (munmap(mappedPtr, count) == -1)
   {
     lasterror = errno;
-    printf("unmap mmappedAddr %x of /dev/mem failed (%d) - %s\n", *mappedAddr, lasterror, strerror(lasterror));
+    printf("unmap mmappedAddr %x of /dev/mem failed (%d) - %s\n", *mappedPtr, lasterror, strerror(lasterror));
   }
 }
 
-void directRead(int fd, int phyAddr, int count)
+void fileInterface(int fd, OPERATION opera, int phyAddr, int count)
 {
   char* buf;
   ssize_t  retSize;
@@ -106,16 +245,42 @@ void directRead(int fd, int phyAddr, int count)
   buf = (char*)malloc(count);
   memset(buf, 0, count);
   lseek(fd, phyAddr, SEEK_SET);
-  retSize = read(fd, buf, count);
-  if (retSize < 0)
+  
+  if (opera == R)
   {
-    lasterror = errno;
-    printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    retSize = read(fd, buf, count);
+    if (retSize < 0)
+    {
+      lasterror = errno;
+      printf("read /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    }
+    else
+    {
+      printBuf(buf, count);
+    }
+  }
+  else if (opera == W)
+  {
+    int i;
+    char *ptr;
+    ptr = buf;
+    for (i = 0; i < count; i++)
+    {
+      *ptr++ = 0x12;
+    }
+
+    retSize = write(fd, buf, count);
+    if (retSize < 0)
+    {
+      lasterror = errno;
+      printf("write /dev/mem failed (%d) - %s\n", lasterror, strerror(lasterror));
+    }
   }
   else
   {
-    printBuf(buf, count);
+    printf("Invalid operation\n");
   }
+  
   free(buf);
 }
 
