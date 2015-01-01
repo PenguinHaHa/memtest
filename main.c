@@ -37,6 +37,10 @@ typedef struct _PARAMTERS {
   int    count;
 } PARAMTERS;
 
+#ifndef DIMENSION
+#define DIMENSION(x) (sizeof(x)/sizeof(x[0]))
+#endif
+
 ////////////
 // PROTOTYPES
 ////////////
@@ -45,14 +49,16 @@ void fileInterface(int fd, OPERATION opera, int phyAddr, int count);
 void mmapInterface(int fd, OPERATION opera, int phyAddr, int count);
 void print_usage(void);
 void parse_options(PARAMTERS *param, int argc, char** argv);
+void e820_info(void);
 
 ////////////
 // LOCALS
 ////////////
 int  lasterror;
-const char* const short_options = "hm:o:s:c:";
+const char* const short_options = "hlm:o:s:c:";
 const struct option long_options[] = {
   {"help", 0, NULL, 'h'},
+  {"list", 0, NULL, 'l'},
   {"method", 1, NULL, 'm'},
   {"operation", 1, NULL, 'o'},
   {"startaddr", 1, NULL, 's'},
@@ -107,6 +113,7 @@ void print_usage(void)
 {
   printf("This is Penguin's mm\n");
   printf("  -h  --help                 Display usage information\n");
+  printf("  -l  --list                 List the layout information of system address\n");
   printf("  -m  --method file/mmap     Specify how to access memory\n");
   printf("  -o  --operation read/write Specify operation\n");
   printf("  -s  --startaddr phyaddr    Specify the start memory addr\n");
@@ -123,8 +130,16 @@ void parse_options(PARAMTERS *param, int argc, char** argv)
   param->operation = R;
   param->startAddr = 0;
   param->count = 0x10;
+  
+  if (argc == 1)
+  {
+    print_usage();
+    param->operation = NONE;
+    return;
+  }
 
-  do {
+  do
+  {
     option = getopt_long(argc, argv, short_options, long_options, NULL);
     switch (option)
     {
@@ -133,6 +148,11 @@ void parse_options(PARAMTERS *param, int argc, char** argv)
         param->operation = NONE;
         break;
 
+      case 'l':
+        e820_info();
+        param->operation = NONE;
+        break;
+      
       case 'm':
         opt_arg = optarg;
         if(!strcmp(opt_arg, "file"))
@@ -185,6 +205,64 @@ void parse_options(PARAMTERS *param, int argc, char** argv)
         break;
     }
   }while (option != -1);
+}
+
+void e820_info(void)
+{
+  unsigned long long e820_start;
+  unsigned long long e820_end;
+  char e820_type[256];
+  unsigned int e820_index = 0;
+  FILE *e820_handle;
+  char szline[256];
+  char szfilename[256];
+
+  for(;;)
+  {
+    //Open /sys/firmware/memmap/#/start
+    snprintf(szfilename, DIMENSION(szfilename), "/sys/firmware/memmap/%d/start", e820_index);
+    e820_handle = fopen(szfilename, "rb");
+    if (e820_handle != NULL)
+    {
+      fgets(szline, DIMENSION(szline), e820_handle);
+      sscanf(szline, "%llX", &e820_start);
+      fclose(e820_handle);
+    }
+    else
+    {
+      break;
+    }
+
+    //Open /sys/firmware/memmap/#/end
+    snprintf(szfilename, DIMENSION(szfilename), "/sys/firmware/memmap/%d/end", e820_index);
+    e820_handle = fopen(szfilename, "rb");
+    if (e820_handle != NULL)
+    {
+      fgets(szline, DIMENSION(szline), e820_handle);
+      sscanf(szline, "%llX", &e820_end);
+      fclose(e820_handle);
+    }
+    else
+    {
+      break;
+    }
+    
+    //Open /sys/firmware/memmap/#/type
+    snprintf(szfilename, DIMENSION(szfilename), "/sys/firmware/memmap/%d/type", e820_index);
+    e820_handle = fopen(szfilename, "rb");
+    if (e820_handle != NULL)
+    {
+      fgets(e820_type, DIMENSION(szline), e820_handle);
+      fclose(e820_handle);
+    }
+    else
+    {
+      break;
+    }
+
+    printf("%d: START 0x%llX, END 0x%llX, TYPE %s\n", e820_index, e820_start, e820_end, e820_type);
+    e820_index++;
+  }
 }
 
 void mmapInterface(int fd, OPERATION opera, int phyAddr, int count)
