@@ -134,7 +134,6 @@ void parseSpdData(char *filename, int addr, SPD_DATA *spdData);
 void spd_info(void);
 int spdReadData(int file, unsigned char *spdRawData);
 int spdReadByte(int file, int reg, unsigned char *byteData);
-int checkI2cSlaveAddr(int file);
 
 ////////////
 // LOCALS
@@ -300,7 +299,7 @@ void spd_info(void)
   int  file;
   int  adapter;
   int  addr;
-  const int i2cAddrOffset = 0xA0 >> 1;
+  unsigned char data;
 
   SPD_DATA spdData;
   
@@ -311,40 +310,27 @@ void spd_info(void)
     if (file < 0)
     {
       lasterror = errno;
-      printf("ERROR, open %s, %s: line %d, (%d) - %s\n", szFilename, __func__, __LINE__, lasterror, strerror(lasterror));
+ //     printf("ERROR, open %s, %s: line %d, (%d) - %s\n", szFilename, __func__, __LINE__, lasterror, strerror(lasterror));
       adapterNumber++;
       continue;
     }
 
-    addr = checkI2cSlaveAddr(file);
-//    printf("%s's addr %d\n", szFilename, addr);
-    if (addr != -1)
+    for (addr = 0x50; addr < 0x58; addr++)
     {
-      memset(spdData.RawData, 0, 256);
-      if (spdReadData(file, spdData.RawData) != -1)
-        parseSpdData(szFilename, addr, &spdData);
+      if (ioctl(file, I2C_SLAVE, addr) != 0)
+        continue;
+
+      if (spdReadByte(file, 0, &data) == 0)
+      {
+        memset(spdData.RawData, 0, 256);
+        if (spdReadData(file, spdData.RawData) != -1)
+          parseSpdData(szFilename, addr, &spdData);
+      }
     }
 
     close(file);
     adapterNumber++;
   }
-}
-
-int checkI2cSlaveAddr(int file)
-{
-  int addr;
-  unsigned char data;
-  
-  for (addr = 0x50; addr < 0x58; addr++)
-  {
-    if (ioctl(file, I2C_SLAVE, addr) != 0)
-      return -1;
-
-    if (spdReadByte(file, 0, &data) == 0)
-      return addr;
-  }
-
-  return -1;
 }
 
 int spdReadData(int file, unsigned char *spdRawData)
@@ -384,13 +370,13 @@ int spdReadByte(int file, int reg, unsigned char *byteData)
 void parseSpdData(char *filename, int addr, SPD_DATA *spdData)
 {
   int i;
-  printf("%s addr 0x%02x:", filename, addr);
+  printf("%s addr 0x%02x:", filename, addr << 1);
   for (i = 0; i < 256; i++)
     printf("0x%02x ", spdData->RawData[i]);
 
   printf("\n");
 
-  printf("Size 0x%02x, Revision 0x%02x, DimmType 0x%02x\n", spdData->Common.Size, spdData->Common.Revision, spdData->Common.DimmType);
+//  printf("Size 0x%02x, Revision 0x%02x, DimmType 0x%02x\n", spdData->Common.Size, spdData->Common.Revision, spdData->Common.DimmType);
 }
 
 void e820_info(void)
